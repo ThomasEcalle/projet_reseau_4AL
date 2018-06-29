@@ -10,10 +10,9 @@
 #include 	<string.h>
 #include	<unistd.h>
 #include	<fcntl.h>
-#include	<sys/select.h>
 
 #define	max(a,b)	((a) > (b) ? (a) : (b))
-#define MAXLINE 500
+#define MAXLINE	500
 
 void str_cli(int, int);
 
@@ -21,9 +20,8 @@ int
 main(int argc, char **argv)
 {
 	int	sockfd;
-	struct sockaddr_in	servaddr;
+	struct sockaddr_in servaddr;
 	int fd;
-
 
 	if (argc != 4)
 		{
@@ -31,101 +29,99 @@ main(int argc, char **argv)
 		exit(-1);
 		}
 
-	// crÃ©ation de la socket
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
-	// mise Ã  zÃ©ro de la structure servaddr
 	bzero(&servaddr, sizeof(servaddr));
 
-	servaddr.sin_family = AF_INET; // IPv4
-	// l'argument nÂ°2 est converti en entier, mis en ordre rÃ©seau 
-	// et affectÃ© au champ sin_port
+	servaddr.sin_family = AF_INET;
 	servaddr.sin_port = htons(atoi(argv[2]));
-	// L'argument nÂ°1 (l'adresse IP sous forme dÃ©cimale pointÃ©e)
-	// est converti en forme numÃ©rique et affectÃ© au champ sin_addr
 	inet_pton(AF_INET, argv[1], &servaddr.sin_addr);
 
-	// Demande de connexion au serveur
 	connect(sockfd, (struct sockaddr*) &servaddr, sizeof(servaddr));
 
-	// Si l'argument nÂ°3 n'est pas la chaÃ®ne "stdin" 
-	if (strcmp(argv[3],"stdin")!=0) 
+	if (strcmp(argv[3],"stdin")!=0)
 		{
-		// alors l'argument nÂ°3 est un nom de fichier que l'on ouvre
-		// le descripteur retournÃ© par open est mis dans fd
 		fd=open(argv[3],O_RDONLY);
-		if (fd<0)	// On teste si l'ouverture du fichier s'est bine passÃ©e.
+		if (fd<0)
 			{
 			printf("Erreur d'ouverture du fichier %s\n",argv[3]);
 			exit(-1);
 			}
 		}
-	else fd=STDIN_FILENO; // Sinon fd prend le descripteur de stdin
+	else fd=STDIN_FILENO;
 
 	str_cli(fd, sockfd);
-
 	exit(0);
 }
 
-void
-str_cli(int fd, int sockfd)
+void str_cli(int fd, int sockfd)
 {
-	int		maxfdp1;
-	fd_set		rset;
-	char		sendline[MAXLINE], recvline[MAXLINE];
-	int 		n;
+int		maxfdp1,stdineof=0; // stdineof passe Ã  1 si on a exÃ©cutÃ© shutdown sur la socket
+fd_set		rset;
+char		sendline[MAXLINE], recvline[MAXLINE];
+int 		n;
 
-	FD_ZERO(&rset); // On met Ã  zÃ©ro l'ensemble rset
-	for ( ; ; ) {
-		FD_SET(fd, &rset); // On met dans rset le descripteur de l'entrÃ©e de donnÃ©es
-		FD_SET(sockfd, &rset); // On met dans rset le descripteur de socket
-		maxfdp1 = max(fd, sockfd) + 1; // on calcule le maximum est deux descripteurs Ã  surveiller et on ajoute 1
-		// on se met en attente d'un Ã©vÃ¨nement 
-		// sur l'entrÃ©e de donnÃ©e ou la socket
-		select(maxfdp1, &rset, NULL, NULL, NULL);
-		// aprÃ¨s select : un Ã©vÃ¨nement s'est produit au moins un des deux descripteurs surveillÃ©s
+if (fd==STDIN_FILENO) printf("\nentrez votre chaine :\n");
 
-		// Si le descripteur de socket appartient Ã  rset aprÃ¨s select
-		// alors c'est qu'il y a eu un Ã©vÃ¨nement sur la socket
-		if (FD_ISSET(sockfd, &rset))
+FD_ZERO(&rset);
+for ( ; ; )
+	{
+	// Si on n'a pas appelÃ© shutdown sur la socket
+	// C'est-Ã -dire qu'on a encore des donnÃ©es Ã  lire sur l'entrÃ©e de donnÃ©es
+	if (stdineof==0)
+		{
+		FD_SET(fd, &rset);  // On ajoute l'entrÃ©e de donnÃ©es Ã  rset
+		maxfdp1 = max(fd, sockfd) + 1; // on calcule la valeur du plus grand descripteur Ã  laquelle on ajoute 1.
+		}
+	else maxfdp1=sockfd+1; // Sinon, il n'y a plus rien Ã  lire sur l'entrÃ©e de donnÃ©es, seule la socket sera surveillÃ©e
+
+	FD_SET(sockfd, &rset); // On ajoute le descripteur de socket Ã  rset
+
+	// On surveille le descripteur de la socket et Ã©ventuellement celui de l'entrÃ©e de donnÃ©es
+	select(maxfdp1, &rset, NULL, NULL, NULL);
+
+	if (FD_ISSET(sockfd, &rset))
+		{	/* socket is readable */
+		n=read(sockfd, recvline, MAXLINE);
+		if (n==0) // Cas oÃ¹ read retourne une valeur nulle
 			{
-			// On lit sur la socket
-			// Si la valeur de retour de read est nulle
-			// C'est que le serveur a envoyÃ© un segment FIN de dÃ©connexion.
-			if ((n=read(sockfd, recvline, MAXLINE)) == 0)
-				{
+			// Si on a appelÃ© shutdown sur la socket (stdineof==1)
+			// alors tout est normal, c'est que le serveur a terminÃ© son envoi de donnÃ©es
+			if (stdineof==1)
+				return; // On sort de la fonction
+			else // Sinon, si on n'a pas appelÃ© shutdown
+				{ // C'est que le serveur est tombÃ©
 				printf("str_cli: serveur termine prematurement\n");
-				exit(-1); // on termine le client
+				exit(-1);
 				}
-			else if (n<0) // Si read retourne une valeur nÃ©gative, c'est qu'un segment RST a Ã©tÃ© reÃ§u et qu'il y a une erreur sur socketla
-					{
-					printf("Erreur de socket\n");
-					exit(-1); // on termine le client
-					}
-			// Sinon, read a retournÃ© une valeur strictement positive
-			// C'est-Ã -dire que des donnÃ©es ont Ã©tÃ© reÃ§ues
-			write(STDOUT_FILENO,recvline,n); // On affiche ces donnÃ©es
-			if (fd==STDIN_FILENO) printf("\nentrez votre chaine :\n");
-
+			}
+		else if (n<0)
+			{
+			printf("Erreur de socket\n");
+			exit(-1);
+			}
+		recvline[n]='\0';
+		write(STDOUT_FILENO,recvline,strlen(recvline));
 		}
 
-		// Si le descripteur de l'entrÃ©e de donnÃ©es appartient Ã  rset aprÃ¨s select
-		// alors c'est qu'il y a eu un Ã©vÃ¨nement sur l'entrÃ©e de donnÃ©es
-		if (FD_ISSET(fd, &rset)) {
-			// On lit sur l'entrÃ©e de donnÃ©es
-			// Si la valeur de retour de read est nulle
-			// C'est qu'on a atteint la fin de fichier
-			// ou que l'utilisateur a fini la saisie.
-			if ((n=read(fd, sendline, MAXLINE)) == 0)
-				{
-				close(sockfd); // On ferme la socket
-				exit(0); // On termine le client
-				}
-			// sinon on Ã©crit dans la socket les n caractÃ¨res
-			// lus au clavier et stockÃ©s dans sendline
-			write(sockfd, sendline, n);
+	if (FD_ISSET(fd, &rset)) // EvÃ¨nement sur l'entrÃ©e de donnÃ©es
+		{
+		// Si la lecture sur l'entrÃ©e de donnÃ©es renvoie 0
+		// (fin de fichier ou fin de saisie)
+		if ((n=read(fd, sendline,MAXLINE)) == 0)
+			{
+			// On ferme la socket Ã  moitiÃ©, seulement en Ã©criture
+			// Pour continuer Ã  recevoir les rÃ©ponses du serveur
+			// Tout en signalant au serveur que le client a terminÃ©
+			shutdown(sockfd,SHUT_WR);
+			stdineof=1; // On marque le fait que shutdown a Ã©tÃ© appelÃ©
+			// Il n'y a plus rien Ã  lire sur l'entrÃ©e de donnÃ©es
+			// On ne surveille plus son descripteur
+			// On le retire de rset.
+			FD_CLR(fd,&rset);
+			continue;
+			}
+		write(sockfd, sendline, n);
 		}
 	}
-
-
 }
