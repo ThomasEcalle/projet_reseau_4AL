@@ -1,0 +1,2 @@
+/home/osboxes/Documents/cours_c/projet/projet_reseau_4AL/server
+User out of the d1 socket
